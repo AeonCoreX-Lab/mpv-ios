@@ -15,12 +15,25 @@ fi
 
 unset CC CXX
 
-# Vulkan is not available on iOS; mpv will use libplacebo purely as a
-# shader/rendering helper library through its own Metal-backed GPU context
-# rather than through libplacebo's Vulkan backend.
+# Only vulkan needs to be explicitly disabled here — it's unavailable on
+# iOS and meson's dependency auto-detection can't be trusted to skip it
+# reliably in a cross-compile sysroot. d3d11/opengl/glslang/shaderc are all
+# `type: 'feature', value: 'auto'` options in libplacebo's own
+# meson_options.txt: with none of their dependencies present in our
+# cross-compiled prefix, auto-detection already resolves them to off
+# without needing to name them explicitly. Matching mpv-android's own
+# libplacebo.sh here deliberately (it only passes -Dvulkan=disabled
+# -Ddemos=false) rather than listing every related flag defensively, since
+# passing extra explicit flags is exactly what broke the libxml2 build
+# after an upstream option was removed — every flag pinned here is one
+# more thing that can go stale on a future libplacebo update.
+#
+# mpv itself renders on iOS via OpenGL ES/EAGL, not libplacebo's own
+# opengl or vulkan backends directly (see MPVGLView.swift and the main
+# README's "Architecture notes" section) — libplacebo is used here purely
+# as mpv's internal shader/rendering-primitives helper library.
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
-	-Dvulkan=disabled -Dd3d11=disabled -Dopengl=disabled -Ddemos=false \
-	-Dglslang=disabled -Dshaderc=disabled
+	-Dvulkan=disabled -Ddemos=false
 
 ninja -C $build -j$cores
 DESTDIR="$prefix_dir" ninja -C $build install

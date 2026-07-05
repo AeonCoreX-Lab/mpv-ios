@@ -44,6 +44,7 @@ jobs:
         env:
           CACHE_MODE: folder
           CACHE_FOLDER: ${{ github.workspace }}/buildscripts/gh-cache
+          IN_CI: 1
         run: |
           mkdir -p "$CACHE_FOLDER"
           ./include/ci.sh install

@@ -26,15 +26,38 @@ fetch_tarbz2 () {
 
 mkdir -p deps && cd deps
 
+# When IN_CI=1 (set by build.yml/release.yml/appetize-preview.yml), the five
+# git-cloned dependencies below (dav1d, ffmpeg, libass, libplacebo, mpv) are
+# pinned to the tag/commit in v_ci_* (see depinfo.sh) instead of cloning
+# whatever the default branch's HEAD happens to be at that moment.
+#
+# This mirrors mpv-android's own download-deps.sh pattern exactly
+# (`[ $IN_CI -eq 1 ] && args+=(--depth=1 -b "$v_ci_ffmpeg")`) — local/manual
+# builds still get the convenience of always-latest-HEAD for quick
+# iteration, but CI gets a reproducible, intentionally-chosen version so a
+# totally unrelated upstream commit landing between two of our own pushes
+# can't silently break the build. See depinfo.sh's comments for how to
+# update these pins.
+IN_CI=${IN_CI:-0}
+
+git_clone_pinned () {
+	# git_clone_pinned <url> <destdir> <ref>
+	if [ "$IN_CI" -eq 1 ]; then
+		git clone --depth=1 -b "$3" "$1" "$2"
+	else
+		git clone "$1" "$2"
+	fi
+}
+
 # mbedtls
 [ ! -d mbedtls ] && fetch_tarbz2 \
 	"https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$v_mbedtls/mbedtls-$v_mbedtls.tar.bz2" mbedtls
 
 # dav1d
-[ ! -d dav1d ] && git clone https://github.com/videolan/dav1d
+[ ! -d dav1d ] && git_clone_pinned https://github.com/videolan/dav1d dav1d "$v_ci_dav1d"
 
 # ffmpeg
-[ ! -d ffmpeg ] && git clone https://github.com/FFmpeg/FFmpeg ffmpeg
+[ ! -d ffmpeg ] && git_clone_pinned https://github.com/FFmpeg/FFmpeg ffmpeg "$v_ci_ffmpeg"
 
 # freetype2
 [ ! -d freetype2 ] && git clone --recurse-submodules \
@@ -57,16 +80,19 @@ mkdir -p deps && cd deps
 	"https://gitlab.gnome.org/GNOME/libxml2/-/archive/v${v_libxml2}/libxml2-v${v_libxml2}.tar.gz" libxml2
 
 # libass
-[ ! -d libass ] && git clone https://github.com/libass/libass
+[ ! -d libass ] && git_clone_pinned https://github.com/libass/libass libass "$v_ci_libass"
 
 # lua
 [ ! -d lua ] && fetch_targz "https://www.lua.org/ftp/lua-$v_lua.tar.gz" lua
 
 # libplacebo
-[ ! -d libplacebo ] && git clone --recursive https://github.com/haasn/libplacebo
+if [ ! -d libplacebo ]; then
+	git_clone_pinned https://github.com/haasn/libplacebo libplacebo "$v_ci_libplacebo"
+	git -C libplacebo submodule update --init --recursive
+fi
 
 # mpv
-[ ! -d mpv ] && git clone https://github.com/mpv-player/mpv
+[ ! -d mpv ] && git_clone_pinned https://github.com/mpv-player/mpv mpv "$v_ci_mpv"
 
 cd ..
 echo "All sources downloaded into buildscripts/deps/"

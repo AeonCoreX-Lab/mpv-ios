@@ -40,4 +40,18 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	-Dcocoa=disabled
 
 ninja -C $build -j$cores
+
+# mpv-android's own mpv.sh carries an equivalent check in the opposite
+# direction (it requests --default-library shared and forces a clean
+# rebuild if meson produced a static .a instead, due to a known meson
+# caching quirk where a stale build dir can retain the previous
+# --default-library choice after it's changed). We request static here, so
+# the failure mode we guard against is the mirror image: a stale build dir
+# still holding a shared .dylib from an earlier run/config.
+if [ -f "$build/libmpv.dylib" ] || ls "$build"/libmpv.*.dylib >/dev/null 2>&1; then
+	echo >&2 "meson produced a shared library despite --default-library=static (stale build dir?), forcing clean rebuild."
+	$0 clean
+	exec $0 build
+fi
+
 DESTDIR="$prefix_dir" ninja -C $build install

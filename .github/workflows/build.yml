@@ -39,6 +39,12 @@ jobs:
         env:
           CACHE_MODE: folder
           CACHE_FOLDER: ${{ github.workspace }}/buildscripts/gh-cache
+          # Pins the five git-cloned deps (mpv, ffmpeg, dav1d, libass,
+          # libplacebo) to the versions in depinfo.sh's v_ci_* variables,
+          # instead of always cloning latest HEAD — see download.sh and
+          # depinfo.sh for why (reproducible CI vs. an unrelated upstream
+          # commit silently breaking an unrelated push).
+          IN_CI: 1
         run: |
           mkdir -p "$CACHE_FOLDER"
           ./include/ci.sh install
