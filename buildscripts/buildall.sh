@@ -117,9 +117,15 @@ c_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
 c_link_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
 cpp_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
 cpp_link_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
+objc_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
+objc_link_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
+objcpp_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
+objcpp_link_args = ['-arch', '$arch', '-isysroot', '$sysroot', '$min_version_flag']
 [binaries]
 c = '$(xcrun --sdk $sdk --find clang)'
 cpp = '$(xcrun --sdk $sdk --find clang++)'
+objc = '$(xcrun --sdk $sdk --find clang)'
+objcpp = '$(xcrun --sdk $sdk --find clang++)'
 ar = '$AR'
 strip = '$STRIP'
 pkgconfig = 'pkg-config'

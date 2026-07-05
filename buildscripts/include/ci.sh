@@ -14,9 +14,21 @@ msg() {
 # platform slice (ios-arm64 / ios-arm64-simulator / ios-x86_64-simulator),
 # since each slice's prefix/ contents are architecture-specific and must be
 # cached separately.
+#
+# CROSSFILE_REV below exists because crossfile.txt itself lives inside the
+# cached prefix/ directory (it's written by buildall.sh's setup_prefix()
+# alongside the actual compiled dependency output). A change to how
+# crossfile.txt is generated — e.g. adding the objc/objcpp binaries mpv's
+# meson.build needs to compile hwdec_ios_gl.m — does NOT change any
+# v_whatever dependency version, so without this marker such a change
+# would silently be masked by a stale cache still holding the old
+# crossfile.txt. Bump this integer any time buildall.sh's setup_prefix()
+# changes, even if no dependency version changed.
+CROSSFILE_REV=2
+
 cache_id() {
 	local platform=$1
-	echo "ios-deps-${platform}-lua${v_lua}-unibreak${v_unibreak}-harfbuzz${v_harfbuzz}-fribidi${v_fribidi}-freetype${v_freetype}-mbedtls${v_mbedtls}-libxml2${v_libxml2}"
+	echo "ios-deps-${platform}-crossfile${CROSSFILE_REV}-lua${v_lua}-unibreak${v_unibreak}-harfbuzz${v_harfbuzz}-fribidi${v_fribidi}-freetype${v_freetype}-mbedtls${v_mbedtls}-libxml2${v_libxml2}"
 }
 
 fetch_prefix() {

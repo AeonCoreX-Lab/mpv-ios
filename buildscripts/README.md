@@ -108,6 +108,15 @@ Notable differences from the Android build:
   stub before it's ever referenced. `os.execute()` calls from any Lua
   script become a no-op reporting failure, rather than the build failing
   to compile at all.
+- **The meson cross file declares an Objective-C compiler.** mpv's iOS
+  VideoToolbox/GLES hardware-decode interop
+  (`video/out/hwdec/hwdec_ios_gl.m`) is Objective-C, so meson needs `objc`
+  and `objcpp` entries under `[binaries]` in `crossfile.txt` — without
+  them, `meson setup` for mpv itself fails with `'objc' compiler binary
+  not defined in cross file [binaries] section`. Since Apple's `clang`
+  handles C, C++, and Objective-C from the same binary depending on file
+  extension, this just points `objc`/`objcpp` at the same `clang`/`clang++`
+  already used for `c`/`cpp`. See `buildall.sh`'s `setup_prefix()`.
 
 ## Output
 
