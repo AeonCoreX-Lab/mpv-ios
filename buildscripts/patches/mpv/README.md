@@ -73,6 +73,34 @@ macOS-only coreaudio files. These patches split what was one combined
 guard block into two, keeping the device-independent half available to
 avfoundation.
 
+### 0007 — `meson.build`: stop compiling `ao_coreaudio_properties.c` for avfoundation-only builds
+
+Found in CI: `ao_coreaudio_properties.c/h` define `ca_get`/`ca_set`/
+`ca_get_ary`/`ca_get_str`/`ca_settable`, all built directly on raw CoreAudio
+HAL types (`AudioObjectID`, `AudioObjectPropertyScope`,
+`AudioObjectPropertySelector`, `AudioObjectPropertyAddress`) that don't
+exist on iOS at all — not narrowly unavailable like the HAL functions
+patches 0002-0006 dealt with, but simply not declared anywhere in the iOS
+SDK, since `<AudioToolbox/AudioToolbox.h>` doesn't transitively pull in the
+macOS-only `<CoreAudio/AudioHardware.h>` HAL header on iOS. Upstream's
+`meson.build` compiles this file whenever *either* `coreaudio` or
+`avfoundation` is enabled — but verified directly against current
+upstream source, none of `ca_get`/`ca_set`/etc. are called from anywhere
+reachable by an avfoundation-only iOS build: only
+`ao_coreaudio.c`/`ao_coreaudio_exclusive.c` (both macOS-only, not built for
+iOS) call them directly, and `ao_coreaudio_utils.c` only calls them from
+inside the blocks patch 0002 already narrowed to `HAVE_COREAUDIO` only.
+So with patches 0001-0006 applied, nothing left in an avfoundation-only
+iOS build actually needs this file — it was only still being pulled in by
+`meson.build`'s own `if features['avfoundation']` block. The patch removes
+that block, leaving `ao_coreaudio_properties.c` compiled only under
+`coreaudio` (correctly still macOS-only, disabled on iOS same as before).
+
+Note: unlike 0001-0006, this patch depends on 0002 already being applied
+(it relies on `ao_coreaudio_utils.c` no longer needing this file's macros
+under avfoundation-only builds) — hence its number placing it after 0006
+in application order.
+
 ## What this unlocks
 
 With these patches applied, `buildscripts/scripts/mpv.sh` re-enables

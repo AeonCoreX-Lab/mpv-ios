@@ -25,6 +25,31 @@ unset CC CXX
 #                       render API to expose MPV_RENDER_API_TYPE_OPENGL)
 #   -Dios-gl=enabled:   builds the CVOpenGLESTextureCache-based VideoToolbox
 #                       hwdec interop for GLES specifically
+#   -Dvideotoolbox-gl=disabled: FOUND IN CI — meson.build's own
+#                       `videotoolbox-gl = get_option('videotoolbox-gl').require(
+#                       features['gl-cocoa'] or features['ios-gl'], ...)` means
+#                       this feature defaults to auto and silently enables
+#                       itself whenever ios-gl is true, since it treats
+#                       gl-cocoa (macOS) and ios-gl (iOS) as two alternate
+#                       ways to satisfy the same feature. hwdec_vt.h's
+#                       `struct priv` then picks its layout with
+#                       `#if HAVE_VIDEOTOOLBOX_GL / #elif HAVE_IOS_GL` — with
+#                       both true, the first (macOS) branch wins, giving the
+#                       struct a plain `GLuint gl_planes[]` with no
+#                       `gl_texture_cache` member. hwdec_ios_gl.m
+#                       unconditionally expects the iOS layout
+#                       (CVOpenGLESTextureCacheRef gl_texture_cache +
+#                       CVOpenGLESTextureRef gl_planes[]), so it fails with
+#                       "no member named 'gl_texture_cache' in 'struct priv'"
+#                       plus GLuint/CVOpenGLESTextureRef mismatch errors.
+#                       Explicitly disabling videotoolbox-gl here (mirroring
+#                       how vulkan/vdpau/vaapi/drm/x11/wayland/cocoa/
+#                       coreaudio are all explicit below rather than left on
+#                       auto) forces struct priv into the HAVE_IOS_GL branch
+#                       hwdec_ios_gl.m actually matches. Not an mpv oversight
+#                       like the patches/ series — meson.build's intent is
+#                       correct on its own; this build just needs to pick
+#                       one of the two alternatives explicitly.
 #   -Dvulkan=disabled:  no MoltenVK path on iOS in this build (that path
 #                       depends on AppKit/NSApplication and doesn't apply)
 # --Dlibmpv=true: build the C API library our Swift wrapper links against.
@@ -69,7 +94,7 @@ meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	-Diconv=disabled -Dlua=enabled \
 	-Dlibmpv=true -Dcplayer=false \
 	-Dmanpage-build=disabled \
-	-Dgl=enabled -Dios-gl=enabled \
+	-Dgl=enabled -Dios-gl=enabled -Dvideotoolbox-gl=disabled \
 	-Dvulkan=disabled -Dvdpau=disabled -Dvaapi=disabled -Ddrm=disabled \
 	-Dx11=disabled -Dwayland=disabled \
 	-Dcocoa=disabled \
