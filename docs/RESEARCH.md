@@ -248,31 +248,61 @@ already understands, while keeping the real compiler flags accurate, is
 a reasonable workaround when patching every dependency's own
 autotools files individually would be more fragile.
 
-## 8. meson's `-Bsymbolic` linker probe fails on Apple's linker
+## 8. `-Bsymbolic`: a fix for something that wasn't actually broken
 
-**What happened:** during mpv's meson configuration step, a linker
-feature-detection probe for `-Bsymbolic` support could trigger spurious
-compiler/linker failures or malformed diagnostic output, in a way that
-disrupted the wider CI pipeline's error handling.
+**What happened:** CI logs showed lines like this during mpv's meson
+configuration step:
+```
+Compiler for C supports link arguments -Wl,-Bsymbolic: NO
+ld: unknown options: -Bsymbolic
+```
+This looked alarming enough that an earlier version of this project
+"fixed" it by injecting `b_symbolic = false` into the generated
+`crossfile.txt`'s `[properties]` section.
 
-**Root cause:** meson's build system includes a built-in check for
-whether the linker supports `-Bsymbolic` (a linker flag with no
-consistent equivalent in Apple's native `ld`). Running this probe against
-Apple's linker doesn't fail gracefully the way meson expects from a
-"feature not supported" response on more traditional linkers.
+**First correction (still incomplete):** that fix didn't actually work —
+the exact same "supports link arguments... NO" line kept appearing in
+later CI runs. Investigating why led to checking meson's own complete,
+official built-in options documentation directly (Universal options, Base
+options, and Compiler options — every category) rather than assuming
+`b_symbolic` was a real option that just needed to be in a different
+cross-file section. **It isn't.** No option by that name exists anywhere
+in meson's built-in option set. The original fix was invalid from the
+start; putting it in `[built-in options]` instead of `[properties]`
+wouldn't have helped either, since meson has no such option to set in the
+first place.
 
-**Fix:** `buildall.sh` explicitly injects `b_symbolic = false` under the
-`[properties]` section of the generated `crossfile.txt`, so meson never
-attempts the probe against Apple's linker in the first place, rather than
-letting it run and deal with the fallout. This required no changes to any
-upstream source — purely a cross-file configuration addition.
+**What the log lines actually are, once traced to mpv's own source:**
+mpv's `meson.build` itself calls
+`cc.get_supported_link_arguments(['-Wl,-Bsymbolic'])` when defining the
+`libmpv` library target. This is meson's own standard
+capability-detection function — it's *designed* to test whether a link
+argument is supported and gracefully return an empty list if not, rather
+than fail the build. The "NO" and the underlying "unknown options"
+sub-process failure are that detection mechanism working exactly as
+intended: it tries the flag, sees the linker reject it, concludes "not
+supported," and simply doesn't pass `-Wl,-Bsymbolic` when actually linking
+`libmpv`. Apple's linker not supporting `-Bsymbolic` was never a build
+failure at all — it was a normal, harmless "feature not available, don't
+use it" result that happens to print a scary-looking `ld: unknown
+options` line as part of how the probe works.
 
-**Lesson:** meson's own built-in feature probes can assume GNU-linker-like
-behavior that Apple's linker doesn't match — when a build fails inside a
-meson *capability check* rather than inside actual project code, the fix
-often belongs in the cross file's `[properties]`/`[built-in options]`
-sections (telling meson what to assume) rather than in any dependency's
-own build script.
+**Actual fix:** remove the invalid `b_symbolic = false` line entirely.
+It did nothing (meson silently ignores unrecognized cross-file
+properties rather than erroring on them), and there was never anything
+here that needed fixing in the first place.
+
+**Lesson:** not every alarming-looking line in a build log is an actual
+failure — meson's own capability-probing conventions can produce
+sub-process errors (a linker genuinely refusing a flag) as an
+*intentional, expected part of successfully detecting what's supported*.
+Before writing a fix, it's worth tracing where a suspicious log line
+actually originates (in this case, mpv's own `meson.build`, not some
+opaque part of the toolchain) and confirming a real problem exists at
+all — this entry's first version didn't do that rigorously enough, and
+shipped a "fix" for a non-existent option that consequently fixed
+nothing, while also creating a false sense that the (non-)issue had been
+resolved.
 
 ## 9. Lua 5.2.4's `os.execute()` calls `system()`, unavailable on iOS
 
@@ -460,47 +490,103 @@ unreachable-but-still-compiled for a given configuration.
 
 ---
 
-## 13. `-fembed-bitcode` produces a corrupted archive on Xcode 16
+## 13. A three-round investigation: bitcode flag, then a misleading error, then the real bug
 
-**What happened:** the XCFramework assembly step (`mpv-ios.sh`'s
-`xcodebuild -create-xcframework`) failed with:
+This entry covers three CI failures that looked like the same issue
+(same error message, same hex value) but turned out to have two
+different root causes discovered across three separate rounds of
+investigation — worth reading as one continuous story, since each round
+corrected something believed settled in the previous one.
+
+**Round 1 — what looked like the whole story:** the XCFramework assembly
+step failed with:
 ```
 error: unable to find any architecture information in the binary at
 '.../libmpv-combined.a': Unknown header: 0xb17c0de
 ```
+`ffmpeg.sh` was passing `-fembed-bitcode` in `--extra-cflags`. Bitcode is
+Apple's abandoned intermediate representation for App Store binaries,
+deprecated starting Xcode 14 and non-functional by Xcode 16 (this
+project's CI toolchain). `0x0B17C0DE` is genuinely LLVM's real bitcode
+wrapper magic number (verified directly against LLVM's own
+documentation) — so this diagnosis wasn't wrong, exactly, but it turned
+out to be incomplete: removing `-fembed-bitcode` was a legitimate fix
+for a real latent problem (that flag becoming actively harmful on modern
+Xcode, worth removing regardless), but **it did not fix this particular
+CI failure**, because it wasn't actually the cause of it.
 
-**Root cause:** `ffmpeg.sh` passed `-fembed-bitcode` in
-`--extra-cflags`. Bitcode was Apple's now-abandoned intermediate
-representation for App Store binaries, deprecated starting Xcode 14 and
-non-functional by Xcode 16 (this project's CI toolchain) — passing this
-flag doesn't just produce a warning, it produces a genuinely malformed
-object file that `libtool`/`xcodebuild` can no longer parse as a valid
-archive at all. The hex value in the error, `0xb17c0de`, is not a
-coincidence: read as ASCII-ish bytes it's spelling out "bitcode" — the
-tool is choking on a bitcode marker it no longer knows how to handle,
-misreading it as a corrupt architecture header.
+**Round 2 — the error persisted after the "fix," with a misleading
+detour:** a later CI run, on a commit that no longer passed
+`-fembed-bitcode` anywhere, hit the exact same error. Re-investigating
+led first to a wrong turn: `ci.sh`'s error handler only dumped
+`meson-log.txt` (the `meson setup`/configure-phase log) on failure, which
+this run showed ending in a completely successful-looking feature
+summary — creating a false impression that the configure step was
+somehow silently failing in a way that log couldn't show. This *was* a
+real, separate gap worth fixing (`meson-log.txt` alone can't show a
+compile-phase failure, since ninja's own output is what actually needs
+inspecting for that), and `ci.sh`'s error handler was improved to say so
+explicitly. But it turned out this diagnostic gap wasn't the actual
+explanation either.
 
-**Fix:** removed `-fembed-bitcode` from `ffmpeg.sh` entirely. It was
-carried over from an era of iOS distribution requirements that no longer
-apply and actively breaks the build on any current Xcode version.
+**Round 3 — the real root cause:** carefully re-reading a full, later CI
+log line by line (not just grepping for "error") surfaced this:
+```
+==> Building mpv for ios-arm64
+Building mpv-ios for ios-arm64...
+Combining 18 static libs for ios-arm64...
+```
+`"Building mpv-ios for ios-arm64..."` should never appear here — this is
+`mpv-ios.sh`'s (the *all-platform* XCFramework assembly script's) own log
+line, printed from inside `ci.sh`'s **per-platform loop**, on its very
+first (`ios-arm64`) iteration, before `ios-arm64-simulator` or
+`ios-x86_64-simulator` had been built at all.
 
-**A cache-invalidation lesson learned here too:** this project already
-had a cache-busting marker (`CROSSFILE_REV`) from the earlier
-`objc`/`objcpp` crossfile fix (see entry 6), but its name and comment
-described it as being specifically about `crossfile.txt`. Fixing this
-bitcode issue needed the exact same kind of cache invalidation (a stale
-cached `ios-arm64`/simulator prefix could still contain a
-bitcode-corrupted `libavcodec.a` from before this fix), which prompted
-renaming the marker to `BUILD_LOGIC_REV` with a broadened comment — it
-now explicitly covers *any* change to `buildall.sh` or `scripts/*.sh`
-that alters compiled output, not just crossfile generation specifically.
+The cause: `ci.sh`'s build loop called
+`./buildall.sh --platform "$platform" -n mpv-ios` — passing **`mpv-ios`**
+as the target name, not `mpv`. `buildall.sh`'s own `build()` function
+treats a target literally named `mpv-ios` as a special case that directly
+invokes `scripts/mpv-ios.sh` (see that function's
+`if [[ "$1" == "mpv-ios" ]]` branch) instead of building the `mpv`
+dependency for the one platform currently being iterated. This meant
+every single loop iteration was prematurely re-running the *entire*
+XCFramework assembly — libtool-merging whatever partial, inconsistent
+set of per-platform `.a` files happened to exist in `prefix/` at that
+moment, including platforms whose `mpv` hadn't been built yet in this
+run. The resulting `libmpv-combined.a` was never a coherent, complete
+archive — hence "unable to find any architecture information." The
+`0xb17c0de` bitcode magic number showing up was very likely a genuine
+leftover artifact from an old, pre-fix cached `.a` (from before entry 13
+round 1's `-fembed-bitcode` removal) being swept into one of these
+premature, incomplete merges — a real bitcode-tainted file was involved,
+just not as the direct cause of *this* error the way round 1 assumed.
 
-**Lesson:** a build flag that was correct advice years ago (bitcode was
-once an actual App Store requirement) can silently become actively
-harmful once the platform moves on — worth periodically checking whether
-long-standing flags in a build script are still doing what they were
-originally added for, especially ones tied to a specific Apple toolchain
-era rather than a stable, version-independent concept.
+**Actual fix:** changed `-n mpv-ios` to `-n mpv` in `ci.sh`'s per-platform
+loop, so each iteration builds only the `mpv` dependency for its own
+platform, and `mpv-ios.sh` (the real XCFramework assembly) runs exactly
+once, after the loop, as originally intended.
+
+**A cache-invalidation footnote:** this project's `BUILD_LOGIC_REV`
+marker (see entry 6's cache-busting mechanism, later broadened in round 1
+of this entry) was already in place and correctly bumped for the
+`-fembed-bitcode` removal — that part of the process worked as designed.
+It just wasn't sufficient on its own, since the actual bug wasn't a
+compiled-artifact staleness problem at all, but a live logic error in how
+`ci.sh` invoked `buildall.sh` on every run, cache or no cache.
+
+**Lesson:** an error message pointing at a plausible, well-known culprit
+(a deprecated bitcode flag, complete with a matching magic-number
+coincidence) can be a real, legitimate problem to fix and still not be
+*the* problem causing the specific failure in front of you. Two rounds of
+"fix the thing that looks right" didn't resolve this — what did was
+reading a complete, unfiltered CI log line-by-line for output that
+shouldn't be there at all (an XCFramework-assembly log line appearing
+inside what should have been a single-platform dependency-build loop),
+rather than continuing to pattern-match on the same error signature
+across successive rounds. Worth remembering that grepping a log for
+"error" finds where something failed, not necessarily *why* — the actual
+explanatory line here was a completely unremarkable-looking status
+message in the wrong place, not anything that says "error" at all.
 
 ## 14. Vulkan via MoltenVK: investigated, not yet attempted
 
@@ -569,3 +655,14 @@ once at the end rather than repeating per-entry:
    system's feature-to-file mapping, not just in-file guards, once this
    pattern has been found once in a codebase — it tends to repeat at
    multiple layers of the same project, not just within a single file.
+6. **A past fix being documented doesn't mean it was correct.** Entry 8
+   is the clearest example: an earlier fix for a `-Bsymbolic`-related log
+   line was itself based on an option (`b_symbolic`) that never existed in
+   meson at all, and the underlying "problem" turned out to be mpv's own
+   harmless capability-detection code working as designed — not a build
+   failure. It took a second look (prompted by the same symptom
+   reappearing in a later CI run) to trace the log line to its actual
+   source and realize the original fix never did anything. Worth revisiting
+   old fixes with the same rigor as new bugs when a symptom that was
+   supposedly already resolved shows up again, rather than assuming the
+   earlier fix must have been right and looking elsewhere first.

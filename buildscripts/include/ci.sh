@@ -98,7 +98,22 @@ elif [ "$1" = "install" ]; then
 elif [ "$1" = "build" ]; then
 	for platform in ios-arm64 ios-arm64-simulator ios-x86_64-simulator; do
 		msg "Building mpv for $platform"
-		./buildall.sh --platform "$platform" -n mpv-ios || {
+		# IMPORTANT: the target argument here MUST be "mpv", not "mpv-ios".
+		# buildall.sh treats a target literally named "mpv-ios" as a special
+		# case (see its build() function) that directly invokes
+		# scripts/mpv-ios.sh - the full, all-three-platforms XCFramework
+		# assembly script - instead of building the "mpv" dependency for
+		# just the one platform this loop iteration is working on. Passing
+		# "mpv-ios" here (an earlier version of this script's actual bug)
+		# meant every iteration of this loop prematurely re-ran the entire
+		# XCFramework assembly, including on the very first (ios-arm64)
+		# iteration before ios-arm64-simulator or ios-x86_64-simulator had
+		# even been built yet. See docs/RESEARCH.md for the full incident -
+		# this produced a corrupted, unreadable build-xcframework/*/libmpv-combined.a
+		# (libtool merging whatever partial/stale set of per-platform .a
+		# files happened to exist in prefix/ at that premature moment) that
+		# looked at first like a leftover -fembed-bitcode issue, but wasn't.
+		./buildall.sh --platform "$platform" -n mpv || {
 			build_dir="deps/mpv/_build_${platform}"
 			echo "::group::meson-log.txt (configure-phase only)"
 			echo "NOTE: this log covers 'meson setup' only. If it ends with a"
