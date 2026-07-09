@@ -99,8 +99,19 @@ elif [ "$1" = "build" ]; then
 	for platform in ios-arm64 ios-arm64-simulator ios-x86_64-simulator; do
 		msg "Building mpv for $platform"
 		./buildall.sh --platform "$platform" -n mpv-ios || {
-			log_file="deps/mpv/_build_${platform}/meson-logs/meson-log.txt"
-			[ -f "$log_file" ] && cat "$log_file"
+			build_dir="deps/mpv/_build_${platform}"
+			echo "::group::meson-log.txt (configure-phase only)"
+			echo "NOTE: this log covers 'meson setup' only. If it ends with a"
+			echo "successful-looking feature summary (Build targets in project: N,"
+			echo "Found ninja...), the actual failure was in the COMPILE step"
+			echo "(ninja), not here - scroll up in this job's own console output"
+			echo "for the real compiler/linker error, since ninja's output goes"
+			echo "directly to this same CI step rather than to a separate log file."
+			echo "A successful-looking meson-log.txt dump here is not evidence"
+			echo "the build actually succeeded - see docs/RESEARCH.md entries 8"
+			echo "and this incident's own entry for a real example of this."
+			[ -f "$build_dir/meson-logs/meson-log.txt" ] && cat "$build_dir/meson-logs/meson-log.txt"
+			echo "::endgroup::"
 			exit 1
 		}
 	done
