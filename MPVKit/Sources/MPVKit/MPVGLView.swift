@@ -1,7 +1,6 @@
 import UIKit
 import OpenGLES
 import CMPV
-import Libmpv
 
 /// Renders mpv video output using OpenGL ES + the mpv render API.
 ///

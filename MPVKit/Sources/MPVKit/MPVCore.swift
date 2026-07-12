@@ -1,6 +1,5 @@
 import Foundation
 import CMPV
-@_exported import Libmpv
 
 /// Errors surfaced from libmpv calls, wrapping mpv's own error codes.
 public struct MPVError: Error, CustomStringConvertible {

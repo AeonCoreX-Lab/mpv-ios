@@ -1,6 +1,5 @@
 import Foundation
 import CMPV
-import Libmpv
 
 /// Typed property access on MPVCore, equivalent to mpv-android's
 /// property.cpp (getPropertyInt/Double/Boolean/String, setProperty*,
