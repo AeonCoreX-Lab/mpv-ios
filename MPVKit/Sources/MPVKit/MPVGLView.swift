@@ -94,7 +94,7 @@ public final class MPVGLView: UIView {
 
         var creationError: MPVError?
 
-        renderQueue.sync {
+        renderQueue.sync { () -> Void in
             EAGLContext.setCurrent(eaglContext)
 
             var initParams = mpv_opengl_init_params(
@@ -152,7 +152,7 @@ public final class MPVGLView: UIView {
     /// the context with mpv_render_context_free() before the mpv core is
     /// destroyed"). Safe to call multiple times.
     public func teardown() {
-        renderQueue.sync {
+        renderQueue.sync { () -> Void in
             guard !isDestroyed else { return }
             isDestroyed = true
 

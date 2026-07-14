@@ -904,6 +904,54 @@ occurrence.
 
 ---
 
+## 19. `DispatchQueue.sync` became ambiguous next to nested generic `rethrows` closures
+
+**What happened:** with entries 15–18 resolved, `MPVKit` progressed
+further into real type-checking and hit:
+```
+MPVGLView.swift:97:21: error: ambiguous use of 'sync(execute:)'
+        renderQueue.sync {
+                    ^
+Dispatch.DispatchQueue:74:17: note: found this candidate in module 'Dispatch'
+    public func sync<T>(execute work: () throws -> T) rethrows -> T
+Dispatch.DispatchQueue:3:17: note: found this candidate in module 'Dispatch'
+    public func sync(execute block: () -> Void)
+```
+
+**Root cause:** `DispatchQueue` (from the `Dispatch` module) declares two
+overloads of `sync`: a generic, `rethrows` version that can return any
+value and propagate a thrown error, and a plain, non-generic version that
+takes a `() -> Void` closure and returns nothing. Normally Swift's
+type-checker picks the right one automatically based on what the trailing
+closure actually does. In `attachRenderContext()`, the closure passed to
+`renderQueue.sync { ... }` contained **nested calls to
+`withUnsafeMutablePointer(to:_:)`**, which is itself generic and
+`rethrows`. With that nested generic/rethrows structure inside, the
+type-checker could no longer confidently infer the outer closure's own
+return type and throwing-ness, making both `sync` overloads look equally
+valid — hence "ambiguous."
+
+**Fix:** added an explicit closure signature, `renderQueue.sync { () ->
+Void in ... }`, at both `.sync { ... }` call sites in `MPVGLView.swift`
+(the one that actually contained nested generic calls, and one other
+that didn't but uses the same `DispatchQueue.sync` pattern, fixed
+defensively rather than relying on the compiler continuing to infer it
+correctly there). This explicitly tells the compiler which overload is
+intended, without changing any runtime behavior — the closures were
+already effectively `() -> Void`, non-throwing; the annotation just makes
+that visible to the type-checker instead of leaving it to infer from
+increasingly complex nested closure bodies.
+
+**Lesson:** an "ambiguous use of X" error doesn't always mean the call
+site itself is unclear to a human reader — it can mean nested generic or
+`rethrows` closures elsewhere in the same closure body are defeating the
+compiler's own type/throws inference for the outer closure. When this
+happens, making the outer closure's signature explicit is usually simpler
+and more robust than trying to restructure the nested calls to make
+inference easier.
+
+---
+
 ## General patterns worth carrying forward
 
 A few things that recurred across multiple entries above, worth stating
