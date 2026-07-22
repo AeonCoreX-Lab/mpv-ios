@@ -127,7 +127,17 @@ public final class MPVGLView: UIView {
             get_proc_address_ctx: nil
         )
 
-        let apiTypeGL = UnsafeMutablePointer(mutating: MPV_RENDER_API_TYPE_OPENGL)
+        // MPV_RENDER_API_TYPE_OPENGL is a C string macro (`#define ... "opengl"`)
+        // imported from libmpv's render.h. Under the stricter Swift/C
+        // interop rules shipped with the Xcode 16.2 / iOS 18.2 SDK, this
+        // kind of macro can be imported as more than one type (e.g.
+        // `UnsafePointer<CChar>` and `String`), so calling
+        // `UnsafeMutablePointer(mutating:)` directly on it is ambiguous —
+        // the compiler can no longer infer which overload to pick. Binding
+        // it to an explicitly-typed `UnsafePointer<CChar>` constant first
+        // pins the type and resolves the ambiguity.
+        let apiTypeGLCString: UnsafePointer<CChar> = MPV_RENDER_API_TYPE_OPENGL
+        let apiTypeGL = UnsafeMutablePointer(mutating: apiTypeGLCString)
 
         return withUnsafeMutablePointer(to: &Self.advancedControlOn) { advancedControlPtr -> MPVError? in
             withUnsafeMutablePointer(to: &initParams) { initParamsPtr -> MPVError? in

@@ -68,3 +68,15 @@ once at the end rather than repeating per-entry:
    at the first match — grepping a codebase for the literal string that
    fixed a similar bug before will miss a different flag causing the same
    underlying problem.
+8. **A fix that looks plausible and matches the error message isn't
+   confirmed until the next CI run actually passes.** Entry 19 shipped an
+   explicit closure-type annotation as a fix for an "ambiguous use of
+   sync(execute:)" error, reasoning correctly about *what* Dispatch's two
+   overloads were but incompletely about *why* the ambiguity existed —
+   and the exact same error reappeared, completely unchanged, in the very
+   next CI run, with the "fix" plainly visible in the quoted failing
+   line. The real fix (extracting nested generic calls out of the
+   closure entirely) only became apparent after that second failure ruled
+   out the first theory. Worth treating a fix as a hypothesis until CI
+   confirms it, not a foregone conclusion just because it addresses a
+   plausible-sounding mechanism.
